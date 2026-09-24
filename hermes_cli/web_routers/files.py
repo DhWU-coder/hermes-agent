@@ -298,10 +298,14 @@ _CHAT_IMAGE_MAGIC: tuple[tuple[bytes, str], ...] = (
 )
 
 
-def _sanitize_chat_image_filename(filename: str | None) -> str:
-    candidate = Path(str(filename or "").strip()).name
-    candidate = re.sub(r"[\x00-\x1f]+", "_", candidate)
-    return candidate.strip().strip(".") or "pasted-image"
+def _sanitize_chat_upload_filename(filename: str | None) -> str:
+    candidate = Path(str(filename or "").strip().replace("\\", "/")).name
+    candidate = re.sub(r"[\x00-\x1f\x7f<>:\"|?*`']+", "_", candidate).strip().strip(".")
+    stem = Path(candidate).stem or "attachment"
+    suffix = Path(candidate).suffix
+    stem = stem.encode("utf-8")[:120].decode("utf-8", errors="ignore").strip(". ") or "attachment"
+    suffix = suffix.encode("utf-8")[:24].decode("utf-8", errors="ignore")
+    return f"{stem}{suffix}"
 
 
 def _chat_image_extension(data: bytes) -> str | None:
@@ -343,7 +347,7 @@ async def upload_chat_image(payload: ChatImageUpload, profile: Optional[str] = N
             with _io_errors("Image directory is not writable", "Could not create image directory"):
                 img_dir.mkdir(parents=True, exist_ok=True)
 
-            stem = Path(_sanitize_chat_image_filename(payload.filename)).stem or "pasted-image"
+            stem = Path(_sanitize_chat_upload_filename(payload.filename)).stem or "pasted-image"
             stem = re.sub(r"[^A-Za-z0-9_.-]+", "_", stem).strip("._-") or "pasted-image"
             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
             target = img_dir / f"dashboard_{ts}_{secrets.token_hex(4)}_{stem}{ext}"
@@ -362,6 +366,28 @@ async def upload_chat_image(payload: ChatImageUpload, profile: Optional[str] = N
     # off the loop; to_thread copies the contextvar context so the override
     # stays scoped to the worker thread.
     return await asyncio.to_thread(_run)
+
+
+@router.post("/api/chat/file-upload")
+async def upload_chat_file(file: UploadFile = File(...), profile: Optional[str] = None):
+    """把浏览器文件保存到当前 profile 的附件目录，供 TUI 的 @file: 引用读取。"""
+    def _target() -> tuple[Path, str]:
+        with _profile_scope(profile) as scoped_home:
+            attachment_dir = Path(scoped_home or get_hermes_home()) / "attachments"
+            with _io_errors("Attachment directory is not writable", "Could not create attachment directory"):
+                attachment_dir.mkdir(parents=True, exist_ok=True)
+            name = _sanitize_chat_upload_filename(file.filename)
+            stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            return attachment_dir / f"dashboard_{stamp}_{secrets.token_hex(8)}_{name}", name
+
+    target, name = await asyncio.to_thread(_target)
+    size = await stream_upload_to_path(
+        file, target,
+        too_large="File is too large",
+        not_writable="Attachment directory is not writable",
+        write_failed="Could not write attachment",
+    )
+    return {"ok": True, "path": str(target), "name": name, "bytes": size}
 
 
 @router.get("/api/files")

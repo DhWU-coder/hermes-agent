@@ -1,6 +1,7 @@
 """Tests for the dashboard-managed file browser API."""
 
 import base64
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -88,6 +89,70 @@ def _seed_file(client, root, name="out/hello.txt"):
     )
     assert created.status_code == 200
     return file_path
+
+
+def test_chat_file_upload_is_authenticated_profile_scoped_and_atomic(monkeypatch, tmp_path):
+    # 两个真实 profile 共享同一个路由，附件必须各自落在自己的目录。
+    home = tmp_path / ".hermes"
+    second = home / "profiles" / "review"
+    second.mkdir(parents=True)
+    (second / "profile.yaml").write_text("name: review\n", encoding="utf-8")
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.setenv("HERMES_HOME", str(home))
+    client, prev_auth_required, prev_bound_host = _client_with_app_state()
+    try:
+        first = client.post(
+            "/api/chat/file-upload",
+            files={"file": ("报告 (1).pdf", b"%PDF-first", "application/pdf")},
+        )
+        assert first.status_code == 200, first.text
+        first_path = Path(first.json()["path"])
+        assert first_path.parent == home / "attachments"
+        assert first_path.read_bytes() == b"%PDF-first"
+        assert first.json()["name"] == "报告 (1).pdf"
+
+        escaped = client.post(
+            "/api/chat/file-upload",
+            files={"file": ("..\\..\\outside.pdf", b"safe", "application/pdf")},
+        )
+        assert escaped.status_code == 200, escaped.text
+        assert Path(escaped.json()["path"]).parent == home / "attachments"
+        assert escaped.json()["name"] == "outside.pdf"
+
+        other = client.post(
+            "/api/chat/file-upload?profile=review",
+            files={"file": ("报告 (1).pdf", b"%PDF-second", "application/pdf")},
+        )
+        assert other.status_code == 200, other.text
+        other_path = Path(other.json()["path"])
+        assert other_path.parent == second / "attachments"
+        assert other_path.read_bytes() == b"%PDF-second"
+        assert first_path.read_bytes() == b"%PDF-first"
+
+        first_again = client.post(
+            "/api/chat/file-upload",
+            files={"file": ("return.txt", b"first profile again", "text/plain")},
+        )
+        assert first_again.status_code == 200, first_again.text
+        assert Path(first_again.json()["path"]).parent == home / "attachments"
+
+        denied = client.post(
+            "/api/chat/file-upload",
+            files={"file": ("secret.txt", b"secret", "text/plain")},
+            headers={web_server._SESSION_HEADER_NAME: "wrong-token"},
+        )
+        assert denied.status_code == 401
+
+        monkeypatch.setattr(web_server, "_MANAGED_FILE_MAX_BYTES", 3)
+        too_large = client.post(
+            "/api/chat/file-upload?profile=review",
+            files={"file": ("large.pdf", b"%PDF-over-limit", "application/pdf")},
+        )
+        assert too_large.status_code == 413
+        assert list((second / "attachments").iterdir()) == [other_path]
+    finally:
+        _close_client(client)
+        _restore_app_state(prev_auth_required, prev_bound_host)
 
 
 

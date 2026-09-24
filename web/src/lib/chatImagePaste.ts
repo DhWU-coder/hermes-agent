@@ -28,16 +28,16 @@ function imageFileKey(file: File): string {
   return `${file.name}\0${file.type}\0${file.size}\0${file.lastModified}`;
 }
 
-function addImageFile(files: File[], seen: Set<string>, file: File | null) {
-  if (!file || !file.type.startsWith("image/")) return;
+function addTransferFile(files: File[], seen: Set<string>, file: File | null) {
+  if (!file) return;
   const key = imageFileKey(file);
   if (seen.has(key)) return;
   seen.add(key);
   files.push(file);
 }
 
-/** Pull every image file out of a DataTransfer (clipboard or drop). */
-export function imageFilesFromTransfer(
+/** 从粘贴或拖入的数据中提取文件，同时去掉重复记录。 */
+export function filesFromTransfer(
   data: DataTransfer | null,
 ): File[] {
   if (!data) return [];
@@ -47,19 +47,35 @@ export function imageFilesFromTransfer(
   if (data.items?.length) {
     for (let i = 0; i < data.items.length; i++) {
       const item = data.items[i];
-      if (item.kind === "file" && item.type.startsWith("image/")) {
-        addImageFile(files, seen, item.getAsFile());
+      if (item.kind === "file") {
+        addTransferFile(files, seen, item.getAsFile());
       }
     }
   }
 
   if (data.files?.length) {
     for (let i = 0; i < data.files.length; i++) {
-      addImageFile(files, seen, data.files[i]);
+      addTransferFile(files, seen, data.files[i]);
     }
   }
 
   return files;
+}
+
+/** Pull every image file out of a DataTransfer (clipboard or drop). */
+export function imageFilesFromTransfer(data: DataTransfer | null): File[] {
+  return filesFromTransfer(data).filter((file) => file.type.startsWith("image/"));
+}
+
+/** 拖动时文件内容尚不可读；根据条目类型决定是否接收释放事件。 */
+export function transferMayContainFile(data: DataTransfer | null): boolean {
+  if (!data) return false;
+  if (data.items?.length) {
+    for (let i = 0; i < data.items.length; i++) {
+      if (data.items[i].kind === "file") return true;
+    }
+  }
+  return Boolean(data.files?.length);
 }
 
 /** Pull the first image blob out of a DataTransfer, or null if none present. */

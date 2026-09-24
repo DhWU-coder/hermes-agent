@@ -25,7 +25,7 @@ import "@xterm/xterm/css/xterm.css";
 import { Button } from "@nous-research/ui/ui/components/button";
 import { Typography } from "@nous-research/ui/ui/components/typography/index";
 import { cn } from "@/lib/utils";
-import { Copy, PanelRight, RotateCcw, X } from "lucide-react";
+import { Copy, Paperclip, PanelRight, RotateCcw, X } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate, useSearchParams } from "react-router";
@@ -77,10 +77,16 @@ import {
   shouldFollowPtyOutput,
 } from "@/lib/pty-scroll";
 import {
-  imageFilesFromTransfer,
-  transferMayContainImage,
+  filesFromTransfer,
+  transferMayContainFile,
   uploadChatImage,
 } from "@/lib/chatImagePaste";
+import {
+  clipboardHasOnlyFileNames,
+  fileReference,
+  isChatImage,
+  uploadChatFile,
+} from "@/lib/chatFilePaste";
 import { maybeReloadForLoopbackWsAuthFailure } from "@/lib/dashboard-auth-reload";
 import {
   PTY_GAVE_UP_BANNER,
@@ -179,6 +185,9 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const uploadFilesRef = useRef<((files: File[]) => void) | null>(null);
+  const [uploadingFiles, setUploadingFiles] = useState(false);
   const isActiveRef = useRef(isActive);
   useEffect(() => {
     isActiveRef.current = isActive;
@@ -624,11 +633,8 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
     //      ever stops listening (e.g. overlays / pickers) or if the user
     //      has selected with the mouse outside of Ink's selection model.
     //
-    //   3. **Ctrl/Cmd+Shift+V.**  Prefers clipboard.read() for images
-    //      (upload → `/image`), else readText() into term.paste().
-    //      preventDefault here suppresses the DOM paste event, so image
-    //      handling must live in this key path — not only the host
-    //      listener below.
+    //   3. **Ctrl/Cmd+V.**  跳过 xterm 的按键翻译，让浏览器发出 paste 事件。
+    //      事件保留文件对象和原始文件名，图片和普通文件都由宿主捕获处理。
     //
     //   4. **DOM paste / drop on the host.**  Bare Ctrl+V and context-menu
     //      paste fire a ClipboardEvent; drag-drop lands files. Image
@@ -665,12 +671,10 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
     const isMac =
       typeof navigator !== "undefined" && /Mac/i.test(navigator.platform);
 
-    // ── Image paste / drop ───────────────────────────────────────────────
-    // The Chat tab is an xterm mirror of a TUI inside the gateway. Server-side
-    // clipboard.paste / xclip never see the browser clipboard, so image paste
-    // must upload browser bytes to HERMES_HOME/images, then drive `/image`
-    // over the PTY (same burst-then-Return timing as handleCopyLast).
-    let imageUploadDisposed = false;
+    // 浏览器里的文件字节对服务端剪贴板不可见；上传后再交给真正的 TUI 输入框。
+    let uploadDisposed = false;
+    let pendingUploads = 0;
+    let uploadQueue = Promise.resolve();
     const pasteDelay = () =>
       new Promise<void>((resolve) => window.setTimeout(resolve, 40));
     const reportImageUploadError = (err: unknown) => {
@@ -680,7 +684,7 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
     };
     const driveImageAttach = async (paths: string[]) => {
       for (const path of paths) {
-        if (imageUploadDisposed) return;
+        if (uploadDisposed) return;
         const ws = wsRef.current;
         if (!ws || ws.readyState !== WebSocket.OPEN) {
           setBanner(
@@ -697,36 +701,73 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
       }
       term.focus();
     };
-    const uploadAndAttachImages = (files: File[]) => {
+    const uploadAndAttachFiles = (files: File[]) => {
       if (!files.length) return;
-      void (async () => {
-        const paths: string[] = [];
-        for (const file of files) {
-          const uploaded = await uploadChatImage(file, scopedProfile);
-          if (imageUploadDisposed) return;
-          paths.push(uploaded.path);
+      pendingUploads += 1;
+      setUploadingFiles(true);
+      uploadQueue = uploadQueue.then(async () => {
+        const images = files.filter(isChatImage);
+        const documents = files.filter((file) => !isChatImage(file));
+        if (images.length) {
+          try {
+            const paths: string[] = [];
+            for (const file of images) {
+              const uploaded = await uploadChatImage(file, scopedProfile);
+              if (uploadDisposed) return;
+              paths.push(uploaded.path);
+            }
+            await driveImageAttach(paths);
+          } catch (err) {
+            reportImageUploadError(err);
+          }
         }
-        await driveImageAttach(paths);
-      })().catch(reportImageUploadError);
+        for (const file of documents) {
+          try {
+            if (wsRef.current?.readyState !== WebSocket.OPEN) {
+              throw new Error("Chat is not connected");
+            }
+            const uploaded = await uploadChatFile(file, scopedProfile);
+            if (uploadDisposed) return;
+            if (wsRef.current?.readyState !== WebSocket.OPEN) {
+              throw new Error("File uploaded, but chat is not connected");
+            }
+            term.paste(`${fileReference(uploaded.path)} `);
+            term.focus();
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            setBanner(`File upload failed (${file.name}): ${message}`);
+          }
+        }
+      }).finally(() => {
+        pendingUploads -= 1;
+        if (!uploadDisposed) setUploadingFiles(pendingUploads > 0);
+      });
     };
+    uploadFilesRef.current = uploadAndAttachFiles;
     const handleBrowserPaste = (ev: ClipboardEvent) => {
-      const files = imageFilesFromTransfer(ev.clipboardData);
-      if (!files.length) return;
+      const files = filesFromTransfer(ev.clipboardData);
+      if (!files.length) {
+        const text = ev.clipboardData?.getData("text/plain") ?? "";
+        if (clipboardHasOnlyFileNames(text)) {
+          setBanner("Clipboard provided only file names. Use Add files to attach them.");
+        }
+        return;
+      }
       ev.preventDefault();
       ev.stopPropagation();
-      uploadAndAttachImages(files);
+      uploadAndAttachFiles(files);
     };
     const handleBrowserDragOver = (ev: DragEvent) => {
-      if (!transferMayContainImage(ev.dataTransfer)) return;
+      if (!transferMayContainFile(ev.dataTransfer)) return;
       ev.preventDefault();
       if (ev.dataTransfer) ev.dataTransfer.dropEffect = "copy";
     };
     const handleBrowserDrop = (ev: DragEvent) => {
-      const files = imageFilesFromTransfer(ev.dataTransfer);
+      const files = filesFromTransfer(ev.dataTransfer);
       if (!files.length) return;
       ev.preventDefault();
       ev.stopPropagation();
-      uploadAndAttachImages(files);
+      uploadAndAttachFiles(files);
     };
     host.addEventListener("paste", handleBrowserPaste, { capture: true });
     host.addEventListener("dragover", handleBrowserDragOver, { capture: true });
@@ -738,13 +779,9 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
       // Copy: Cmd+C on macOS, Ctrl+C or Ctrl+Shift+C elsewhere. Copy only
       // when xterm has a selection; without one Ctrl+C still reaches the TUI
       // as SIGINT.
-      // Paste: Cmd+Shift+V on macOS, Ctrl+Shift+V on others.
+      // 粘贴快捷键交给浏览器的 paste 事件，以保留文件字节和文件名。
       const copyModifier = isMac ? ev.metaKey : ev.ctrlKey;
-      // Paste on BARE Ctrl+V too (not only Ctrl+Shift+V). Bare Ctrl+V otherwise
-      // falls through to the TUI, whose server-side clipboard read can't see the
-      // browser/OS clipboard → "No image found in clipboard". Routing Ctrl+V
-      // through the same navigator.clipboard path below makes it paste
-      // image-or-text correctly, like Ctrl+Shift+V.
+      // 阻止 xterm 把 Ctrl+V 当作终端按键；浏览器随后触发原生粘贴事件。
       const pasteModifier = isMac ? ev.metaKey : ev.ctrlKey;
 
       const terminalSelection = term.getSelection();
@@ -796,42 +833,7 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
       }
 
       if (pasteModifier && ev.key.toLowerCase() === "v") {
-        // preventDefault suppresses the DOM paste event, so image paste must
-        // be handled here via clipboard.read() — readText() alone misses
-        // image-only clipboards (the Discord / #24860 failure mode).
-        ev.preventDefault();
-        void (async () => {
-          try {
-            const read = navigator.clipboard?.read;
-            if (typeof read === "function") {
-              const items = await read.call(navigator.clipboard);
-              const files: File[] = [];
-              for (const item of items) {
-                const type = item.types.find((t) => t.startsWith("image/"));
-                if (!type) continue;
-                const blob = await item.getType(type);
-                const ext = type.split("/")[1]?.split("+")[0] || "png";
-                files.push(
-                  new File([blob], `clipboard.${ext}`, { type }),
-                );
-              }
-              if (files.length) {
-                uploadAndAttachImages(files);
-                return;
-              }
-            }
-          } catch {
-            /* fall through to text paste */
-          }
-          try {
-            const text = await navigator.clipboard.readText();
-            if (text) term.paste(text);
-          } catch (err) {
-            const message =
-              err instanceof Error ? err.message : String(err);
-            console.warn("[dashboard clipboard] paste failed:", message);
-          }
-        })();
+        // 返回 false 只跳过 xterm 的 keydown；不能 preventDefault，否则文件粘贴事件不会到达宿主。
         return false;
       }
 
@@ -1589,7 +1591,8 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
 
     return () => {
       unmounting = true;
-      imageUploadDisposed = true;
+      uploadDisposed = true;
+      uploadFilesRef.current = null;
       syncMetricsRef.current = null;
       clearEraseSuppressionTimer();
       clearResumeLoadingTimers();
@@ -1946,6 +1949,17 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
             ref={hostRef}
             className="hermes-chat-xterm-host min-h-0 min-w-0 flex-1"
           />
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            className="hidden"
+            aria-label="Choose files for chat"
+            onChange={(event) => {
+              uploadFilesRef.current?.(Array.from(event.currentTarget.files ?? []));
+              event.currentTarget.value = "";
+            }}
+          />
 
           {showReconnectOverlay && (
             <div className="absolute inset-x-3 top-3 z-20 flex justify-center sm:inset-x-auto sm:right-3 sm:justify-end">
@@ -2026,30 +2040,39 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
             </div>
           )}
 
-          <Button
-            ghost
-            onClick={handleCopyLast}
-            title="Copy last assistant response as raw markdown"
-            aria-label="Copy last assistant response"
-            className={cn(
-              "absolute z-10",
-              "normal-case tracking-normal font-normal",
-              "rounded border border-current/30",
-              "bg-black/20",
-              "opacity-70 hover:opacity-100 hover:border-current/60",
-              "transition-opacity duration-150",
-              "bottom-2 right-2 px-2 py-1 text-xs sm:bottom-3 sm:right-3 sm:px-2.5 sm:py-1.5",
-              "lg:bottom-4 lg:right-4",
-            )}
-            style={{ color: terminalFg }}
-          >
-            <span className="inline-flex items-center gap-1.5">
-              <Copy className="h-3 w-3 shrink-0" />
-              <span className="hidden min-[400px]:inline tracking-wide">
-                {copyState === "copied" ? "copied" : "copy last response"}
+          <div className="absolute bottom-2 right-2 z-10 flex items-center gap-2 sm:bottom-3 sm:right-3 lg:bottom-4 lg:right-4">
+            <Button
+              ghost
+              disabled={ptyState !== "open" || uploadingFiles}
+              onClick={() => fileInputRef.current?.click()}
+              title="Add files to chat"
+              aria-label="Add files to chat"
+              className="rounded border border-current/30 bg-black/20 px-2 py-1 text-xs font-normal normal-case tracking-normal opacity-70 transition-opacity duration-150 hover:border-current/60 hover:opacity-100 sm:px-2.5 sm:py-1.5"
+              style={{ color: terminalFg }}
+            >
+              <span className="inline-flex items-center gap-1.5">
+                <Paperclip className="h-3 w-3 shrink-0" />
+                <span className="hidden min-[400px]:inline tracking-wide">
+                  {uploadingFiles ? "uploading…" : "add files"}
+                </span>
               </span>
-            </span>
-          </Button>
+            </Button>
+            <Button
+              ghost
+              onClick={handleCopyLast}
+              title="Copy last assistant response as raw markdown"
+              aria-label="Copy last assistant response"
+              className="rounded border border-current/30 bg-black/20 px-2 py-1 text-xs font-normal normal-case tracking-normal opacity-70 transition-opacity duration-150 hover:border-current/60 hover:opacity-100 sm:px-2.5 sm:py-1.5"
+              style={{ color: terminalFg }}
+            >
+              <span className="inline-flex items-center gap-1.5">
+                <Copy className="h-3 w-3 shrink-0" />
+                <span className="hidden min-[400px]:inline tracking-wide">
+                  {copyState === "copied" ? "copied" : "copy last response"}
+                </span>
+              </span>
+            </Button>
+          </div>
 
           {chatPanelCollapsed && (
             <Button

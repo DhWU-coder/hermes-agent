@@ -21,6 +21,7 @@ class FakeWebglAddon {
 }
 
 class FakeTerminal {
+  static instances: FakeTerminal[] = [];
   options: Record<string, unknown>;
   rows = 24;
   cols = 80;
@@ -28,13 +29,15 @@ class FakeTerminal {
     registerOscHandler: vi.fn(),
   };
   unicode = { activeVersion: "" };
+  keyHandler: ((event: KeyboardEvent) => boolean) | null = null;
 
   constructor(options: Record<string, unknown>) {
     this.options = options;
+    FakeTerminal.instances.push(this);
   }
 
-  attachCustomKeyEventHandler() {
-    return true;
+  attachCustomKeyEventHandler(handler: (event: KeyboardEvent) => boolean) {
+    this.keyHandler = handler;
   }
 
   attachCustomWheelEventHandler() {
@@ -77,7 +80,7 @@ class FakeTerminal {
 
   open() {}
 
-  paste() {}
+  paste = vi.fn();
 
   refresh() {}
 
@@ -91,10 +94,21 @@ const apiMocks = vi.hoisted(() => ({
 const uploadChatImage = vi.hoisted(() =>
   vi.fn(async () => ({ path: "/tmp/pasted.png" })),
 );
+const uploadChatFile = vi.hoisted(() =>
+  vi.fn(async (file: File) => ({
+    path: `/tmp/${file.name}`,
+    name: file.name,
+    bytes: file.size,
+  })),
+);
 
 vi.mock("@/lib/chatImagePaste", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/chatImagePaste")>()),
   uploadChatImage,
+}));
+vi.mock("@/lib/chatFilePaste", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/chatFilePaste")>()),
+  uploadChatFile,
 }));
 
 vi.mock("@xterm/addon-fit", () => ({ FitAddon: FakeFitAddon }));
@@ -205,6 +219,8 @@ async function render(ui: ReactNode) {
 
 beforeEach(() => {
   FakeWebSocket.instances = [];
+  FakeTerminal.instances = [];
+  uploadChatFile.mockClear();
   maybeReloadForLoopbackWsAuthFailure.mockClear();
   apiMocks.buildWsUrl.mockReset();
   apiMocks.buildWsUrl.mockResolvedValue("ws://localhost/api/pty?channel=chat-1");
@@ -269,6 +285,71 @@ afterEach(async () => {
 });
 
 describe("ChatPage", () => {
+  it("把剪贴板、拖入和所选 PDF 上传后插入 TUI 引用，发送仍由用户决定", async () => {
+    const { default: ChatPage } = await import("./ChatPage");
+    await render(
+      <MemoryRouter initialEntries={["/chat"]}>
+        <ChatPage isActive />
+      </MemoryRouter>,
+    );
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
+    const socket = FakeWebSocket.instances[0];
+    await act(async () => socket.onopen?.());
+    const terminal = FakeTerminal.instances[0];
+    const host = container.querySelector(".hermes-chat-xterm-host");
+    expect(host).not.toBeNull();
+
+    const key = new KeyboardEvent("keydown", { key: "v", ctrlKey: true, cancelable: true });
+    expect(terminal.keyHandler?.(key)).toBe(false);
+    expect(key.defaultPrevented).toBe(false);
+
+    const pasted = new File(["%PDF-first"], "中文 报告.pdf", { type: "application/pdf" });
+    const paste = new Event("paste", { bubbles: true, cancelable: true });
+    Object.defineProperty(paste, "clipboardData", {
+      value: {
+        files: [pasted],
+        items: [{ kind: "file", type: "application/pdf", getAsFile: () => pasted }],
+        getData: () => pasted.name,
+      },
+    });
+    await act(async () => host!.dispatchEvent(paste));
+    await vi.waitFor(() => expect(terminal.paste).toHaveBeenCalledWith("@file:`/tmp/中文 报告.pdf` "));
+    expect(paste.defaultPrevented).toBe(true);
+
+    const textPaste = new Event("paste", { bubbles: true, cancelable: true });
+    Object.defineProperty(textPaste, "clipboardData", {
+      value: { files: [], items: [{ kind: "string", type: "text/plain" }], getData: () => "普通文字" },
+    });
+    await act(async () => host!.dispatchEvent(textPaste));
+    expect(textPaste.defaultPrevented).toBe(false);
+
+    const namesOnly = new Event("paste", { bubbles: true, cancelable: true });
+    Object.defineProperty(namesOnly, "clipboardData", {
+      value: { files: [], items: [{ kind: "string", type: "text/plain" }], getData: () => "手册.pdf\n报告.pdf" },
+    });
+    await act(async () => host!.dispatchEvent(namesOnly));
+    expect(namesOnly.defaultPrevented).toBe(false);
+    expect(container.textContent).toContain("Clipboard provided only file names");
+
+    const dropped = new File(["%PDF-second"], "中文 报告.pdf", { type: "application/pdf" });
+    const drop = new Event("drop", { bubbles: true, cancelable: true });
+    Object.defineProperty(drop, "dataTransfer", {
+      value: { files: [dropped], items: [{ kind: "file", type: "application/pdf", getAsFile: () => dropped }] },
+    });
+    await act(async () => host!.dispatchEvent(drop));
+    await vi.waitFor(() => expect(terminal.paste).toHaveBeenCalledWith("@file:`/tmp/中文 报告.pdf` "));
+    expect(drop.defaultPrevented).toBe(true);
+
+    const selected = new File(["notes"], "课件.txt", { type: "text/plain" });
+    const input = container.querySelector<HTMLInputElement>('input[type="file"]');
+    expect(input).not.toBeNull();
+    Object.defineProperty(input!, "files", { configurable: true, value: [selected] });
+    await act(async () => input!.dispatchEvent(new Event("change", { bubbles: true })));
+    await vi.waitFor(() => expect(terminal.paste).toHaveBeenCalledWith("@file:/tmp/课件.txt "));
+    expect(uploadChatFile).toHaveBeenCalledTimes(3);
+    expect(socket.send).not.toHaveBeenCalledWith(expect.stringContaining("@file:"));
+  });
+
   it("sends a PTY keepalive frame every 20 seconds while the socket is open", async () => {
     vi.useFakeTimers();
     try {
