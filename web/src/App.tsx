@@ -97,6 +97,7 @@ const ChannelsPage = lazy(() => import("@/pages/ChannelsPage"));
 const WebhooksPage = lazy(() => import("@/pages/WebhooksPage"));
 const SystemPage = lazy(() => import("@/pages/SystemPage"));
 const ChatPage = lazy(() => import("@/pages/ChatPage"));
+const GraphicalChatPage = lazy(() => import("@/pages/GraphicalChatPage"));
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { ThemeSwitcher } from "@/components/ThemeSwitcher";
 import { useI18n } from "@/i18n";
@@ -144,6 +145,12 @@ const CHAT_NAV_ITEM: NavItem = {
   icon: Terminal,
 };
 
+const GRAPHICAL_CHAT_NAV_ITEM: NavItem = {
+  path: "/chat-ui",
+  label: "图形聊天",
+  icon: MessageSquare,
+};
+
 /**
  * Built-in routes except /chat.  Chat is rendered persistently (outside
  * <Routes>) when embedded — see the persistent chat host block rendered
@@ -158,6 +165,7 @@ const CHAT_NAV_ITEM: NavItem = {
 const BUILTIN_ROUTES_CORE: Record<string, ComponentType> = {
   "/": RootRedirect,
   "/sessions": SessionsPage,
+  "/chat-ui": GraphicalChatPage,
   "/files": FilesPage,
   "/analytics": AnalyticsPage,
   "/models": ModelsPage,
@@ -402,6 +410,8 @@ export default function App() {
   const isDocsRoute = pathname === "/docs" || pathname === "/docs/";
   const normalizedPath = pathname.replace(/\/$/, "") || "/";
   const isChatRoute = normalizedPath === "/chat";
+  const isGraphicalChatRoute = normalizedPath === "/chat-ui";
+  const isFullHeightChatRoute = isChatRoute || isGraphicalChatRoute;
   const embeddedChat = isDashboardEmbeddedChatEnabled();
   // Defer mounting the persistent chat host (and its xterm chunk) until the
   // user has actually opened /chat at least once. Sticky after that so the
@@ -459,9 +469,7 @@ export default function App() {
   );
 
   const builtinNav = useMemo(() => {
-    const base = embeddedChat
-      ? [CHAT_NAV_ITEM, ...BUILTIN_NAV_REST]
-      : BUILTIN_NAV_REST;
+    const base = [GRAPHICAL_CHAT_NAV_ITEM, ...(embeddedChat ? [CHAT_NAV_ITEM] : []), ...BUILTIN_NAV_REST];
     return showTokenAnalytics
       ? base
       : base.filter((n) => n.path !== "/analytics");
@@ -526,7 +534,7 @@ export default function App() {
         <PluginSlot name="backdrop" />
       </div>
 
-      <header
+      {!isGraphicalChatRoute && <header
         className={cn(
           "lg:hidden fixed top-0 left-0 right-0 z-40 min-h-14",
           "flex items-center gap-2 px-4 py-2",
@@ -555,9 +563,9 @@ export default function App() {
         <Typography className="font-bold text-[0.95rem] leading-[0.95] tracking-[0.05em] text-midground">
           {t.app.brand}
         </Typography>
-      </header>
+      </header>}
 
-      {mobileOpen && (
+      {mobileOpen && !isGraphicalChatRoute && (
         <Button
           ghost
           aria-label={t.app.closeNavigation}
@@ -573,7 +581,7 @@ export default function App() {
           fixed lg:hidden header is h-14/z-40; previously each banner carried
           its own mt-14 AND the content kept pt-14, so two visible banners
           stacked three offsets (NS-656 review P3). One spacer, applied once. */}
-      <div aria-hidden className="h-14 shrink-0 lg:hidden" />
+      {!isGraphicalChatRoute && <div aria-hidden className="h-14 shrink-0 lg:hidden" />}
       <PluginSlot name="header-banner" />
       <ProfileScopeBanner />
       <MemoryPressureBanner status={sidebarStatus} />
@@ -581,7 +589,7 @@ export default function App() {
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         <div className="flex min-h-0 min-w-0 flex-1">
-          <aside
+          {!isGraphicalChatRoute && <aside
             id="app-sidebar"
             aria-label={t.app.navigation}
             className={cn(
@@ -754,14 +762,14 @@ export default function App() {
               <AuthWidget />
               <SidebarFooter status={sidebarStatus} />
             </div>
-          </aside>
+          </aside>}
 
           <PageHeaderProvider pluginTabs={pluginTabMeta}>
             <div
               className={cn(
                 "relative z-2 flex min-w-0 min-h-0 flex-1 flex-col",
-                "px-3 sm:px-6",
-                isChatRoute
+                isGraphicalChatRoute ? "px-0" : "px-3 sm:px-6",
+                isGraphicalChatRoute ? "pb-0 pt-0" : isFullHeightChatRoute
                   ? "pb-0 pt-1 sm:pt-2 lg:pt-4"
                   : "pt-2 sm:pt-4 lg:pt-6",
                 isDocsRoute && "min-h-0 flex-1",
@@ -771,9 +779,9 @@ export default function App() {
               <div
                 className={cn(
                   "w-full min-w-0",
-                  !isChatRoute &&
+                  !isFullHeightChatRoute &&
                     "pb-[calc(2rem+env(safe-area-inset-bottom,0px))] lg:pb-8",
-                  (isDocsRoute || isChatRoute) &&
+                  (isDocsRoute || isFullHeightChatRoute) &&
                     "min-h-0 flex flex-1 flex-col",
                 )}
               >
