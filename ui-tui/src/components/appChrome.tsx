@@ -618,7 +618,13 @@ export function StatusRule({
       : ''
 
   const showBar = !!bar && fits(SEP + stringWidth(`[${bar}] ${pct != null ? `${contextMark}${pct}%` : ''}`))
-  const showDuration = segs.duration && ok('duration') && !!sessionStartedAt && fits(SEP + MAX_DURATION_WIDTH)
+  const sessionDurationLabel = '会话时长（含闲置）：'
+
+  const showDuration =
+    segs.duration &&
+    ok('duration') &&
+    !!sessionStartedAt &&
+    fits(SEP + stringWidth(sessionDurationLabel) + MAX_DURATION_WIDTH)
 
   // Idle clock — time since the last final agent response. Hidden while busy
   // (the FaceTicker's elapsed tail covers the live turn) and before the first
@@ -751,6 +757,7 @@ export function StatusRule({
         {showDuration ? (
           <Text color={t.color.muted} wrap="truncate-end">
             {' │ '}
+            {sessionDurationLabel}
             <SessionDuration startedAt={sessionStartedAt!} />
           </Text>
         ) : null}

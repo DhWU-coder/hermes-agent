@@ -401,6 +401,9 @@ def _emit_terminal_turn_error(
                **({"partial": True} if partial else {}), **({"rendered": rendered} if rendered else {})}
     if retire_marker:
         _retire_turn_marker(session)
+    from tui_gateway.task_timing import finish_task_timing
+    with _session_profile_runtime_scope(session):
+        payload["task_timing"] = finish_task_timing(sid, session, text, "error")
     _emit("message.complete", sid, payload)
 
 

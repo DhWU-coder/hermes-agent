@@ -2,6 +2,7 @@ import { TERMUX_TUI_MODE } from '../config/env.js'
 import type { Msg } from '../types.js'
 
 import { transcriptBodyWidth } from './inputMetrics.js'
+import { taskTimingLabel } from './taskTiming.js'
 
 const hashText = (text: string) => {
   let h = 5381
@@ -26,6 +27,7 @@ export const messageHeightKey = (msg: Msg) => {
   return [
     msg.role,
     msg.kind ?? '',
+    msg.taskTiming?.finished_at != null ? taskTimingLabel(msg.taskTiming) : '',
     hashText([msg.text, msg.thinking ?? '', msg.tools?.join('\n') ?? '', todoSig, panelSig, introSig].join('\0'))
   ].join(':')
 }
@@ -108,6 +110,11 @@ export const estimatedMsgHeight = (
   const bodyWidth = transcriptBodyWidth(cols, msg.role, userPrompt, TERMUX_TUI_MODE)
   const text = msg.text
   let h = wrappedLines(text || ' ', bodyWidth)
+
+  if (msg.taskTiming?.finished_at != null) {
+    // 页脚也占据虚拟列表高度，避免恢复历史时与下一条消息重叠。
+    h += wrappedLines(taskTimingLabel(msg.taskTiming), bodyWidth)
+  }
 
   if (!compact && msg.role === 'assistant') {
     // Paragraph gaps add up to 6 extra rows of breathing room. Slice

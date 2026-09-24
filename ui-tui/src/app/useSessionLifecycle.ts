@@ -24,6 +24,7 @@ import { applyConnectionRequest, clearConnectionOperation } from './connectionOp
 import type { ComposerActions, GatewayRpc, StateSetter } from './interfaces.js'
 import { patchOverlayState } from './overlayStore.js'
 import { scheduleResumeScrollToBottom } from './sessionResumeView.js'
+import { $taskTiming, restoreTaskTiming } from './taskTimingStore.js'
 import { turnController } from './turnController.js'
 import { patchTurnState } from './turnStore.js'
 import { getUiState, patchUiState } from './uiStore.js'
@@ -157,6 +158,7 @@ export function useSessionLifecycle(opts: UseSessionLifecycleOptions) {
     cancelResumeScrollRef.current?.()
     cancelResumeScrollRef.current = null
     turnController.fullReset()
+    $taskTiming.set(null)
     setVoiceRecording(false)
     setVoiceProcessing(false)
     patchUiState({ bgTasks: new Set(), info: null, sid: null, storedSid: null, usage: ZERO })
@@ -185,6 +187,7 @@ export function useSessionLifecycle(opts: UseSessionLifecycleOptions) {
       turnController.persistedToolLabels.clear()
 
       setHistoryItems(info ? [introMsg(info)] : [])
+      $taskTiming.set(null)
       setStickyPrompt('')
       setLastUserMsg('')
       composerActions.setComposerTokens([])
@@ -328,6 +331,7 @@ export function useSessionLifecycle(opts: UseSessionLifecycleOptions) {
           resetSession()
           setSessionStartedAt(r.started_at ? r.started_at * 1000 : Date.now())
           const transcript = [...toTranscriptMessages(r.messages), ...liveSessionInflightMessages(r.inflight)]
+          restoreTaskTiming(transcript, info?.task_timing)
           setHistoryItems(info ? [introMsg(info), ...transcript] : transcript)
           writeActiveSessionFile(storedSid)
           patchUiState({
@@ -390,6 +394,7 @@ export function useSessionLifecycle(opts: UseSessionLifecycleOptions) {
             setSessionStartedAt(r.started_at ? r.started_at * 1000 : Date.now())
 
             const resumed = [...toTranscriptMessages(r.messages), ...liveSessionInflightMessages(r.inflight)]
+            restoreTaskTiming(resumed, info?.task_timing)
 
             setHistoryItems(info ? [introMsg(info), ...resumed] : resumed)
             writeActiveSessionFile(storedSid)

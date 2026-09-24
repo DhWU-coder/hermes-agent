@@ -532,6 +532,7 @@ export interface SessionLiveInfo {
   personality?: string
   running?: boolean
   turn_started_at?: number | null
+  task_timing?: TaskTiming | null
   title?: string
   stored_session_id?: string
   desktop_contract?: number | string | null
@@ -553,6 +554,13 @@ export interface ProjectRef {
   slug: string
   name: string
   primary_path?: string | null
+}
+/** 任务的展示时间；后台等待不结算，终止后不再累加闲置时间。 */
+export interface TaskTiming {
+  started_at: number
+  finished_at?: number | null
+  status: string
+  approximate?: boolean
 }
 /** ``tui_gateway/server.py::_get_usage`` + ``agent/context_breakdown.py::context_usage_fields``. */
 export interface Usage {
@@ -2795,6 +2803,7 @@ export interface TranscriptMessage {
   content?: unknown | null
   tool_call_id?: string | null
   timestamp?: number | null
+  task_timing?: TaskTiming | null
   row_id?: number | null
   display_kind?: string | null
   display_metadata?: unknown | null
@@ -3046,6 +3055,7 @@ export interface SessionCwdSetResult {
   personality?: string
   running?: boolean
   turn_started_at?: number | null
+  task_timing?: TaskTiming | null
   title?: string
   stored_session_id?: string
   desktop_contract?: number | string | null
@@ -4340,6 +4350,10 @@ export interface ErrorPayload {
 export interface NoticePayload {
   message: string
 }
+/** 开始事件携带跨后台接续的任务起点；旧的发送端可以省略。 */
+export interface MessageStartPayload {
+  task_timing?: TaskTiming | null
+}
 /** ``prompt_turn._invoke_agent._stream`` (message.delta: ``text`` + optional ``rendered``), ``agent_callbacks._agent_cbs`` (reasoning.delta / thinking.delta), ``tool_progress._progress_reasoning`` (reasoning.available). ``verbose`` rides only when the session's verbose reasoning mode is on. */
 export interface StreamDeltaPayload {
   text: string
@@ -4354,6 +4368,7 @@ export interface MessageInterimPayload {
 /** ``prompt_turn._complete_turn_payload`` / ``session_auto_continue._emit_terminal_turn_error`` / ``agent_callbacks._mirror_subagent_to_child`` (child watch mirror: ``text`` only) / ``compute_host_bridge`` (``text`` + ``status``). */
 export interface MessageCompletePayload {
   text?: string | unknown
+  task_timing?: TaskTiming | null
   usage?: Usage | null
   status?: TurnStatus | null
   reasoning?: string | null
@@ -5476,8 +5491,8 @@ export interface BackendGatewayEventMap {
   'message.interim': MessageInterimPayload
   /** The agent reacted to a message; paint it live. */
   'message.reaction': MessageReactionPayload
-  /** A turn began streaming; no payload. */
-  'message.start': Record<string, never>
+  /** A turn began streaming, with optional task timing. */
+  'message.start': MessageStartPayload
   /** The MoA aggregator started. */
   'moa.aggregating': MoaAggregatingPayload
   /** MoA phase transition (currently only ``aggregator``). */

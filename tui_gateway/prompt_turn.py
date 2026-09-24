@@ -1007,6 +1007,7 @@ def _run_prompt_submit(
         muted = diagnostic_turn_muted(display_metadata, "tui", notification_config)
     if muted:
         display_kind = "hidden"
+    session["_task_timing_suppressed"] = muted
     # The ONE INFO record proving a prompt was accepted by THIS process; ties ui sid,
     # session_key and the agent's live session_id together.  No prompt content is logged.
     _turn_started_monotonic = time.monotonic()
@@ -1022,7 +1023,10 @@ def _run_prompt_submit(
         sid, session.get("session_key") or "", getattr(agent, "session_id", "") or "",
         display_kind or "user", len(text) if isinstance(text, str) else "-", len(images))
     if not muted:
-        _emit("message.start", sid)
+        from tui_gateway.task_timing import begin_task_timing
+        with _session_profile_runtime_scope(session):
+            timing = begin_task_timing(session, text, display_kind, display_metadata)
+        _emit("message.start", sid, {"task_timing": timing})
 
     def run_body():
         # RPC-dispatcher ContextVars do not follow onto this thread: rebind the transport
@@ -1051,6 +1055,9 @@ def _run_prompt_submit(
             status_note = _absorb_turn_result(
                 sid, session, st, text, display_kind, display_metadata)
             payload, raw, status = _complete_turn_payload(session, st, status_note, cols)
+            if not muted:
+                from tui_gateway.task_timing import finish_task_timing
+                payload["task_timing"] = finish_task_timing(sid, session, raw, status)
             _emit("message.complete", sid, payload)
             goal_followup = _goal_followup_after_turn(sid, session, st.result, status, raw)
             if status == "complete":

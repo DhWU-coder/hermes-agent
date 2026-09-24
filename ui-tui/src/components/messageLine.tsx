@@ -10,6 +10,7 @@ import { sectionMode } from '../domain/details.js'
 import { userDisplay } from '../domain/messages.js'
 import { ROLE } from '../domain/roles.js'
 import { transcriptBodyWidth, transcriptGutterWidth } from '../lib/inputMetrics.js'
+import { taskTimingLabel } from '../lib/taskTiming.js'
 import { boundedLiveRenderText, compactPreview, isPasteBackedText } from '../lib/text.js'
 import type { Theme } from '../theme.js'
 import type { ActiveTool, DetailsMode, Msg, SectionVisibility } from '../types.js'
@@ -313,6 +314,13 @@ export const MessageLine = memo(function MessageLine({
 
         <Box width={transcriptBodyWidth(cols, msg.role, t.brand.prompt, TERMUX_TUI_MODE)}>{content}</Box>
       </Box>
+      {msg.taskTiming?.finished_at != null && (
+        <Box marginLeft={gutterWidth}>
+          <Text color={t.color.muted} dim>
+            {taskTimingLabel(msg.taskTiming)}
+          </Text>
+        </Box>
+      )}
     </Box>
   )
 })

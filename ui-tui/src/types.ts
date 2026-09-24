@@ -1,4 +1,4 @@
-import type { ProjectInfo, SessionLiveInfo, SubagentStatus, ToolLabel } from '@hermes/shared/gateway-events'
+import type { ProjectInfo, SessionLiveInfo, SubagentStatus, TaskTiming, ToolLabel } from '@hermes/shared/gateway-events'
 
 export interface ActiveTool {
   context?: string
@@ -134,6 +134,8 @@ export interface ClarifyReq {
 }
 
 export interface Msg {
+  // 独立展示字段，复制回复和提交模型时都不拼入正文。
+  taskTiming?: TaskTiming
   info?: SessionInfo
   kind?: 'diff' | 'event' | 'intro' | 'panel' | 'slash' | 'trail'
   panelData?: PanelData

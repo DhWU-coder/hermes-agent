@@ -60,6 +60,15 @@ class McpServerStatus(OpenModel):
     error: str | None = None
 
 
+class TaskTiming(Result):
+    """任务的展示时间；后台等待不结算，终止后不再累加闲置时间。"""
+
+    started_at: float
+    finished_at: float | None = None
+    status: str
+    approximate: bool = False
+
+
 class SessionLiveInfo(OpenModel):
     """``tui_gateway/server.py::_session_info`` — the ``session.info`` event and the ``info`` field of
     ``session.create`` / ``session.resume`` / ``session.activate`` results."""
@@ -83,6 +92,7 @@ class SessionLiveInfo(OpenModel):
     personality: str = ""
     running: bool = False
     turn_started_at: float | None = None
+    task_timing: TaskTiming | None = None
     title: str = ""
     stored_session_id: str = ""
     desktop_contract: int | str | None = None
@@ -163,6 +173,7 @@ class TranscriptMessage(OpenModel):
     content: JsonValue | None = None
     tool_call_id: str | None = None
     timestamp: float | None = None
+    task_timing: TaskTiming | None = None
     row_id: int | None = None
     display_kind: str | None = None
     display_metadata: JsonValue | None = None

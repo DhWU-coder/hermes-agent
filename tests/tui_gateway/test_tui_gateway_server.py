@@ -739,7 +739,15 @@ def test_prompt_submit_golden_transcript_matches_flag_off_and_on(monkeypatch):
         finally:
             server._sessions.pop("sid", None)
 
-    assert run_flag_on() == run_flag_off()
+    isolated, local = run_flag_on(), run_flag_off()
+    started = next(payload["task_timing"] for event, _, payload in local if event == "message.start")
+    finished = next(payload["task_timing"] for event, _, payload in local if event == "message.complete")
+    assert finished["started_at"] == started["started_at"] <= finished["finished_at"]
+    # 模拟的旧版隔离进程不提供可选计时字段；文本、事件顺序和用量仍须完全一致。
+    def without_timing(events):
+        return [(event, sid, ({k: v for k, v in payload.items() if k != "task_timing"} or None)
+                 if isinstance(payload, dict) else payload) for event, sid, payload in events]
+    assert without_timing(isolated) == without_timing(local)
 
 
 def test_session_context_explicit_cwd_for_ephemeral_task(monkeypatch, tmp_path):
@@ -16835,6 +16843,35 @@ def test_session_active_list_reports_live_sessions(monkeypatch):
     assert rows["sid-b"]["status"] == "working"
     assert rows["sid-b"]["title"] == "Implement"
     assert rows["sid-b"]["preview"] == "writing code"
+
+
+def test_session_active_list_isolated_by_profile(monkeypatch, tmp_path):
+    launch_home = tmp_path / "hermes"
+    sibling_home = launch_home / "profiles" / "sibling"
+    sibling_home.mkdir(parents=True)
+    monkeypatch.setenv("HERMES_HOME", str(launch_home))
+    monkeypatch.setattr(server, "_hermes_home", launch_home)
+
+    previous_sessions = dict(server._sessions)
+    server._sessions.clear()
+    server._sessions["sid-launch"] = _session(
+        agent=types.SimpleNamespace(model="model-a"),
+        session_key="key-launch", created_at=10.0,
+    )
+    server._sessions["sid-sibling"] = _session(
+        agent=types.SimpleNamespace(model="model-b"),
+        session_key="key-sibling", created_at=11.0,
+        profile_home=str(sibling_home),
+    )
+    try:
+        for profile, expected in [('', 'sid-launch'), ('sibling', 'sid-sibling'), ('', 'sid-launch')]:
+            response = server.handle_request({
+                "id": profile or "launch", "method": "session.active_list", "params": {"profile": profile},
+            })
+            assert [row["id"] for row in response["result"]["sessions"]] == [expected]
+    finally:
+        server._sessions.clear()
+        server._sessions.update(previous_sessions)
 
 
 def test_session_active_list_excludes_finalized_sessions(monkeypatch):

@@ -199,10 +199,12 @@ _HISTORY_ROLES = frozenset({"user", "assistant", "tool", "system"})
 
 def _history_to_messages(history: list[dict], *, profile_home=None) -> list[dict]:
     from agent.history_commentary import project_history_commentary
+    from tui_gateway.task_timing import history_task_timings
 
+    timings = history_task_timings(history)
     messages = []
     tool_call_args = {}
-    for m in history:
+    for index, m in enumerate(history):
         if not isinstance(m, dict):
             continue
         m = project_compaction_message_for_display(m)
@@ -269,6 +271,8 @@ def _history_to_messages(history: list[dict], *, profile_home=None) -> list[dict
             msg["display_kind"] = display_kind
         if m.get("display_metadata"):
             msg["display_metadata"] = m["display_metadata"]
+        if index in timings:
+            msg["task_timing"] = timings[index]
         messages.append(msg)
     return project_history_commentary(messages, home=profile_home)
 

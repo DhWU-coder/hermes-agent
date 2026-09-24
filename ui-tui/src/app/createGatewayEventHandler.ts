@@ -34,6 +34,7 @@ import type { GatewayEventHandlerContext, NoticeLevel } from './interfaces.js'
 import { getOverlayState, patchOverlayState } from './overlayStore.js'
 import { flashGoodVibes, flashPet } from './petFlashStore.js'
 import { forgetServerRequest } from './serverRequestStore.js'
+import { $taskTiming, applyTaskTiming } from './taskTimingStore.js'
 import { turnController } from './turnController.js'
 import { getTurnState } from './turnStore.js'
 import { getUiState, patchUiState } from './uiStore.js'
@@ -830,6 +831,10 @@ export function createGatewayEventHandler(ctx: GatewayEventHandlerContext): (ev:
           return
         }
 
+        if (info.task_timing) {
+          $taskTiming.set(info.task_timing)
+        }
+
         // A replayed snapshot can be the only terminal signal after reconnect.
         // Missing running on older gateways must not clear a live turn.
         if (info.running === false) {
@@ -900,6 +905,12 @@ export function createGatewayEventHandler(ctx: GatewayEventHandlerContext): (ev:
         return
 
       case 'message.start':
+        if (ev.payload?.task_timing) {
+          const timing = ev.payload.task_timing
+          $taskTiming.set(timing)
+          setHistoryItems(prev => applyTaskTiming(prev, timing))
+        }
+
         resetAgentsNudgeTurnState()
         turnController.startMessage()
 
@@ -1568,6 +1579,12 @@ export function createGatewayEventHandler(ctx: GatewayEventHandlerContext): (ev:
           if (bellOnComplete && stdout?.isTTY) {
             stdout.write('\x07')
           }
+        }
+
+        if (ev.payload?.task_timing) {
+          const timing = ev.payload.task_timing
+          $taskTiming.set(timing)
+          setHistoryItems(prev => applyTaskTiming(prev, timing))
         }
 
         setStatus('ready')

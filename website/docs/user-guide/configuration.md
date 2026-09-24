@@ -2316,6 +2316,8 @@ Notes:
 - The same key also filters the **Ink TUI** status rule (`hermes tui`), where `cache_hit`, `latency`, and `tps` render as width-budgeted tail segments (◎ / ◷ / ↑) on terminals ≥96/104/110 columns respectively.
 - Display-only: no effect on prompt caching or request payloads. Changes take effect on the next session start.
 
+网页对话和 Ink TUI 还会单独显示**本次任务耗时**：从用户发送需求开始计时，后台进程与委派任务的接续包含在内，最终回复完成后冻结，并在回复下方保留耗时。它与标记为“会话时长（含闲置）”的会话时钟不同，完成后的闲置不会继续计入任务耗时。重新打开历史会话可以恢复记录；旧消息按已有时间戳估算并标记“约”，缺少有效时间戳时不显示推测值。
+
 ### Runtime-metadata footer (gateway only)
 
 When `display.runtime_footer.enabled: true`, Hermes appends a small runtime-context footer to the **final** message of each gateway turn. The current footer can show the model, context-window percentage, and current working directory. Off by default; opt in per-gateway if your team wants every reply to include this provenance.

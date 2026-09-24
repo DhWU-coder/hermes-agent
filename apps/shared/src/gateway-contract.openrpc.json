@@ -17538,6 +17538,17 @@
             "default": "",
             "title": "Text"
           },
+          "task_timing": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TaskTiming"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
           "usage": {
             "anyOf": [
               {
@@ -17879,6 +17890,25 @@
           "role"
         ],
         "title": "MessageReactionPayload",
+        "type": "object"
+      },
+      "MessageStartPayload": {
+        "additionalProperties": false,
+        "description": "\u5f00\u59cb\u4e8b\u4ef6\u643a\u5e26\u8de8\u540e\u53f0\u63a5\u7eed\u7684\u4efb\u52a1\u8d77\u70b9\uff1b\u65e7\u7684\u53d1\u9001\u7aef\u53ef\u4ee5\u7701\u7565\u3002",
+        "properties": {
+          "task_timing": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TaskTiming"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "title": "MessageStartPayload",
         "type": "object"
       },
       "MoaAggregatingPayload": {
@@ -28927,6 +28957,17 @@
             "default": null,
             "title": "Turn Started At"
           },
+          "task_timing": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TaskTiming"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
           "title": {
             "default": "",
             "title": "Title",
@@ -29781,6 +29822,17 @@
             ],
             "default": null,
             "title": "Turn Started At"
+          },
+          "task_timing": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TaskTiming"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
           },
           "title": {
             "default": "",
@@ -33931,6 +33983,43 @@
         "title": "TaskIdResult",
         "type": "object"
       },
+      "TaskTiming": {
+        "additionalProperties": false,
+        "description": "\u4efb\u52a1\u7684\u5c55\u793a\u65f6\u95f4\uff1b\u540e\u53f0\u7b49\u5f85\u4e0d\u7ed3\u7b97\uff0c\u7ec8\u6b62\u540e\u4e0d\u518d\u7d2f\u52a0\u95f2\u7f6e\u65f6\u95f4\u3002",
+        "properties": {
+          "started_at": {
+            "title": "Started At",
+            "type": "number"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Finished At"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "approximate": {
+            "default": false,
+            "title": "Approximate",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "started_at",
+          "status"
+        ],
+        "title": "TaskTiming",
+        "type": "object"
+      },
       "TerminalClosePayload": {
         "additionalProperties": false,
         "properties": {
@@ -34936,6 +35025,17 @@
             ],
             "default": null,
             "title": "Timestamp"
+          },
+          "task_timing": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TaskTiming"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
           },
           "row_id": {
             "anyOf": [
@@ -37921,13 +38021,12 @@
     },
     {
       "name": "message.start",
-      "summary": "A turn began streaming; no payload.",
+      "summary": "A turn began streaming, with optional task timing.",
       "params": [
         {
           "name": "payload",
           "schema": {
-            "type": "object",
-            "additionalProperties": false
+            "$ref": "#/components/schemas/MessageStartPayload"
           }
         }
       ]

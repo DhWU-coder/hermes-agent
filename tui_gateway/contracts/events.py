@@ -18,7 +18,7 @@ from __future__ import annotations
 from pydantic import Field
 
 from .base import JsonValue, Payload, WireEnum
-from .common import MessageReaction, SessionLiveInfo, SubagentStatus, ToolLabel, ToolLabelKind, Usage
+from .common import MessageReaction, SessionLiveInfo, SubagentStatus, TaskTiming, ToolLabel, ToolLabelKind, Usage
 from .config_free_tier_control import SessionControlSnapshot
 from .registry import event
 
@@ -104,7 +104,13 @@ event("notice", NoticePayload, doc="Informational one-liner for the session (cap
 # ── turn stream ───────────────────────────────────────────────────────────────────────────────
 
 
-event("message.start", None, doc="A turn began streaming; no payload.")
+class MessageStartPayload(Payload):
+    """开始事件携带跨后台接续的任务起点；旧的发送端可以省略。"""
+
+    task_timing: TaskTiming | None = None
+
+
+event("message.start", MessageStartPayload, doc="A turn began streaming, with optional task timing.")
 
 
 class StreamDeltaPayload(Payload):
@@ -186,6 +192,7 @@ class MessageCompletePayload(Payload):
     ``compute_host_bridge`` (``text`` + ``status``)."""
 
     text: str | JsonValue = ""
+    task_timing: TaskTiming | None = None
     usage: Usage | None = None
     status: TurnStatus | None = None
     reasoning: str | None = None

@@ -37,6 +37,7 @@ import { MessageLine } from './messageLine.js'
 import { PetKitty, PetSprite } from './petSprite.js'
 import { QueuedMessages } from './queuedMessages.js'
 import { LiveTodoPanel, StreamingAssistant } from './streamingAssistant.js'
+import { TaskTimingLine } from './taskTiming.js'
 import { type InputCursorSnapshot, TextInput, type TextInputMouseApi } from './textInput.js'
 
 // Box geometry, kept here so the transcript's reservation math matches the
@@ -495,7 +496,8 @@ const StatusRulePane = memo(function StatusRulePane({
   }
 
   return (
-    <Box marginTop={at === 'top' ? 1 : 0}>
+    <Box flexDirection="column" marginTop={at === 'top' ? 1 : 0}>
+      <TaskTimingLine t={ui.theme} />
       <StatusRule
         battery={ui.battery ? ui.batteryStatus : null}
         bgCount={ui.bgTasks.size}

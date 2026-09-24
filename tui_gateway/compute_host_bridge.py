@@ -120,6 +120,12 @@ def _relay_compute_host_rpc(message: dict) -> bool:
     """Relay host frames to the client while mirroring the server→client request the host has open, so a
     reconnecting client gets it back through ``open_requests``."""
     params = message.get("params") if isinstance(message, dict) else None
+    # 隔离进程拥有计时状态，父进程保留镜像供断线重连使用。
+    if isinstance(params, dict) and params.get("type") in {"message.start", "message.complete"}:
+        session = _sessions.get(str(params.get("session_id") or ""))
+        timing = (params.get("payload") or {}).get("task_timing")
+        if session is not None and isinstance(timing, dict):
+            session["task_timing"] = dict(timing)
     if isinstance(message, dict) and message.get("method") == "compute_host.activity":
         if isinstance(params, dict):
             session = _sessions.get(str(params.get("session_id") or ""))
